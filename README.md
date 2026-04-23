@@ -11,7 +11,7 @@ for students who want a quick second opinion on a homework rational.
 Desktop (for testing the program before sending it to the calculator):
 
 ```
-source source_me.sh && python3 rational.py
+python3 rational.py
 ```
 
 To run on a TI-84 Plus CE Python, send `rational.py` to the calculator
@@ -29,7 +29,7 @@ input steps are in [docs/USAGE.md](docs/USAGE.md).
 ## Testing
 
 ```
-source source_me.sh && python3 -m pytest tests/test_rational.py
+python3 -m pytest tests/test_rational.py
 ```
 
 ## Author

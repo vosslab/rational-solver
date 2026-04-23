@@ -1,5 +1,66 @@
 # Changelog
 
+## 2026-04-25
+
+### Additions and New Features
+
+- Rewrote `print_result` in a verbose TI-friendly format: full section
+  labels (`Vertical asymptote`, `Hole`, `X-intercepts`, `Y-intercept`,
+  `Horizontal asymptote`, `Slant asymptote`, `Linear function`, etc.),
+  one value per line, blank line between sections. The sign chart now
+  prints `Above x-axis on` / `Below x-axis on` on the line preceding
+  each interval instead of cramming `+`/`-` at the end. The TI-84 Plus
+  CE Home screen scrolls, so prioritizing per-line clarity over fitting
+  everything on screen is the right tradeoff.
+
+### Fixes and Maintenance
+
+- Zero denominator now raises a clear `ValueError('denominator is
+  identically zero')` before any analysis instead of crashing later with
+  `ZeroDivisionError`.
+- Zero numerator (`0 / D(x)`) is recognized as the constant zero
+  function with removable holes at every root of the denominator, not
+  a rational function with spurious vertical asymptotes.
+
+### Developer Tests and Notes
+
+- `sign_chart()` now returns a list of `(side, interval_str)` tuples
+  so presentation (full labels vs. single-char signs) is decoupled from
+  the math. Test `test_sign_chart_runs` updated accordingly.
+- Added `test_zero_denominator_raises` and
+  `test_zero_numerator_constant_zero`. Total test count 30, all passing.
+
+## 2026-04-24
+
+### Behavior or Interface Changes
+
+- Narrowed scope to integer coefficients only. Decimal inputs such as
+  `1.5x+2` now raise a clear `ValueError` at tokenization time. This
+  matches the kinds of problems the tool is actually used for and
+  removes a class of floating-point edge cases from the parser and
+  rational-root logic.
+- Sign chart now includes holes as breakpoints, so a hole at x=2 splits
+  the sign row the same way a VA or x-intercept does. Graph-shape
+  summaries are no longer silently missing a discontinuity.
+- Sign chart and y-intercept now evaluate the *reduced* numerator and
+  denominator (post hole cancellation), matching the reduced
+  end-behavior classification.
+- Parser accepts a leading x-monomial prefix before parenthesized
+  factors, so `x(x+1)`, `-x(x-4)`, and `2x^2(x+1)` all parse correctly.
+  Previously the factored-mode branch demanded only an optional integer
+  before the first `(`.
+
+### Fixes and Maintenance
+
+- Dropped `source source_me.sh &&` from documented commands. The script
+  was removed; plain `python3` is sufficient for a single-file project.
+
+### Developer Tests and Notes
+
+- Added tests for `x(x+1)`, `-x(x-4)`, `2x^2(x+1)`, decimal rejection,
+  and hole-as-breakpoint in the sign chart. Total test count 28, all
+  passing.
+
 ## 2026-04-23
 
 ### Behavior or Interface Changes

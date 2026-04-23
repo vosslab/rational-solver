@@ -44,6 +44,30 @@ def test_parse_factored_quadratic_inside():
 	assert rational.parse('(x-1)(x^2+1)') == [1, -1, 1, -1]
 
 
+def test_parse_variable_prefix_factor():
+	# x(x+1) must work: leading x-monomial then parenthesized factor
+	assert rational.parse('x(x+1)') == [1, 1, 0]
+
+
+def test_parse_negated_variable_prefix():
+	# -x(x-4) = -x*(x-4) = -x^2 + 4x
+	assert rational.parse('-x(x-4)') == [-1, 4, 0]
+
+
+def test_parse_coef_times_xpower_times_factor():
+	# 2x^2(x+1) = 2x^3 + 2x^2
+	assert rational.parse('2x^2(x+1)') == [2, 2, 0, 0]
+
+
+def test_parse_rejects_decimal():
+	# decimals are out of scope (integer coefficients only)
+	try:
+		rational.parse('1.5x+2')
+	except ValueError:
+		return
+	raise AssertionError('expected ValueError for decimal coefficient')
+
+
 def test_tokenize_rejects_junk():
 	try:
 		rational.parse('x@2')
@@ -136,6 +160,18 @@ def test_analyze_hole_detection():
 	assert math.isclose(vas[0], -3.0)
 
 
+def test_sign_chart_includes_holes_as_breakpoints():
+	# hole at x=2 must split the sign row, not be silently merged
+	num = rational.parse('(x-2)(x+1)')
+	den = rational.parse('(x-2)(x+3)')
+	result = rational.analyze(num, den)
+	# 2.0 appears as a critical x-value alongside the VA and x-intercept
+	assert any(math.isclose(c, 2.0) for c in result['crit'])
+	intervals = rational.sign_chart(result)
+	# breakpoints should produce 4 intervals (3 breakpoints: -3, -1, 2)
+	assert len(intervals) == 4
+
+
 def test_analyze_reduces_to_linear():
 	# (3x^2 - 27) / (x - 3): hole at x=3, reduces to y = 3x+9 (Linear, not Slant)
 	num = rational.parse('3x^2-27')
@@ -186,8 +222,29 @@ def test_sign_chart_runs():
 	den = rational.parse('(x+6)(x-1)')
 	result = rational.analyze(num, den)
 	intervals = rational.sign_chart(result)
-	# every interval string ends with a sign marker
-	assert all(iv[-1] in '+-0?' for iv in intervals)
+	# each entry is a (side, interval_string) tuple
+	assert all(side in ('above', 'below', 'zero', 'undef') for side, _ in intervals)
+	assert all(s.startswith('(') and s.endswith(')') for _, s in intervals)
+
+
+def test_zero_denominator_raises():
+	# 0 in the denominator is undefined; fail loudly before any analysis
+	try:
+		rational.analyze(rational.parse('x-1'), rational.parse('0'))
+	except ValueError:
+		return
+	raise AssertionError('expected ValueError for zero denominator')
+
+
+def test_zero_numerator_constant_zero():
+	# 0 / (x-1) is the zero function with a removable hole at x=1
+	result = rational.analyze(rational.parse('0'), rational.parse('x-1'))
+	assert result['vas'] == []
+	holes = [r for r, _ in result['holes']]
+	assert len(holes) == 1
+	assert math.isclose(holes[0], 1.0)
+	assert result['end'][0] == 'constant'
+	assert math.isclose(result['end'][1], 0.0)
 
 
 #============================================

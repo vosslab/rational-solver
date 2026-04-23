@@ -195,21 +195,33 @@ def parse_expanded(tokens):
 
 
 def parse_factored(tokens):
-	"""Parse a product like 3(x-1)^2(x+2), each factor being any polynomial."""
-	i = 0
+	"""
+	Parse an expression that contains at least one parenthesized factor.
+
+	Tokens before the first `(` are treated as an expanded-polynomial
+	prefix, so both `3(x-1)` and `-x(x-4)` and `2x^2(x+1)` work. After
+	the first `(`, only a sequence of `(...)^k` factors is allowed.
+	"""
 	n = len(tokens)
-	# leading optional sign
-	lead_sign = 1
-	if i < n and tokens[i] == ('op', '-'):
-		lead_sign = -1
-		i += 1
-	elif i < n and tokens[i] == ('op', '+'):
-		i += 1
-	# leading optional integer coefficient
-	poly = [lead_sign]
-	if i < n and tokens[i][0] == 'num':
-		poly = [lead_sign * tokens[i][1]]
-		i += 1
+	# locate the prefix / first factor boundary
+	first_lp = -1
+	for idx in range(n):
+		if tokens[idx] == ('lp',):
+			first_lp = idx
+			break
+	prefix = tokens[:first_lp] if first_lp >= 0 else tokens
+	# prefix is either empty, a sign-only run, or an expanded monomial/poly
+	if not prefix:
+		poly = [1]
+	elif all(t[0] == 'op' and t[1] in '+-' for t in prefix):
+		sign = 1
+		for t in prefix:
+			if t[1] == '-':
+				sign = -sign
+		poly = [sign]
+	else:
+		poly = parse_expanded(prefix)
+	i = first_lp if first_lp >= 0 else n
 	while i < n:
 		if tokens[i] != ('lp',):
 			raise ValueError('expected ( in factored expression')
@@ -476,25 +488,58 @@ def reduce_by_holes(coeffs, holes):
 	return reduced
 
 
+def _is_zero_poly(coeffs):
+	"""True when the polynomial is identically zero."""
+	return all(c == 0 for c in coeffs)
+
+
+def _zero_numerator_result(num_coeffs, den_coeffs):
+	"""Build the result for 0 / D(x): constant 0 with holes at den roots."""
+	_, den_roots_raw, _ = factor(den_coeffs)
+	den_roots = merge_roots(den_roots_raw)
+	# every denominator root is a removable hole, not a VA
+	holes = list(den_roots)
+	result = {
+		'holes': holes,
+		'vas': [],
+		'xints': [],
+		'yint': 0.0 if poly_eval(den_coeffs, 0) != 0 else None,
+		'end': ('constant', 0.0),
+		'num_coeffs': num_coeffs,
+		'den_coeffs': den_coeffs,
+		'red_num': [0],
+		'red_den': [1],
+		'crit': sorted(r for r, _ in holes),
+	}
+	return result
+
+
 def analyze(num_coeffs, den_coeffs):
 	"""Full analysis pipeline. Returns a result dict."""
+	# zero denominator: function is undefined everywhere, no analysis to do
+	if _is_zero_poly(den_coeffs):
+		raise ValueError('denominator is identically zero')
+	# zero numerator: f(x) = 0 everywhere, with removable undefined points
+	# at every root of the denominator; skip factoring logic entirely
+	if _is_zero_poly(num_coeffs):
+		return _zero_numerator_result(num_coeffs, den_coeffs)
 	_num_lead, num_roots_raw, _num_res = factor(num_coeffs)
 	_den_lead, den_roots_raw, _den_res = factor(den_coeffs)
 	num_roots = merge_roots(num_roots_raw)
 	den_roots = merge_roots(den_roots_raw)
 	holes, xints, vas = compute_holes_and_remainders(num_roots, den_roots)
-	# y-intercept on the original expression
-	den0 = poly_eval(den_coeffs, 0)
-	if den0 != 0:
-		yint = poly_eval(num_coeffs, 0) / den0
-	else:
-		yint = None
-	# end-behavior classification uses *reduced* polynomials so that
-	# cancellable factors do not spuriously promote a case to "Slant"
+	# reduce both sides by shared factors so downstream analysis sees
+	# the cancelled function, not the raw one
 	red_num = reduce_by_holes(num_coeffs, holes)
 	red_den = reduce_by_holes(den_coeffs, holes)
 	red_num_deg = len(red_num) - 1
 	red_den_deg = len(red_den) - 1
+	# y-intercept of the reduced function (holes don't produce a y-value)
+	den0 = poly_eval(red_den, 0)
+	if den0 != 0:
+		yint = poly_eval(red_num, 0) / den0
+	else:
+		yint = None
 	# when the reduced denominator is a constant, the function is a
 	# polynomial; label by its degree rather than calling it an asymptote
 	if red_den_deg == 0:
@@ -516,8 +561,10 @@ def analyze(num_coeffs, den_coeffs):
 		end = ('slant', quot)
 	else:
 		end = ('poly', red_num_deg - red_den_deg)
-	# critical x-values for sign chart (real, non-hole)
-	crit = [r for r, _ in vas] + [r for r, _ in xints]
+	# breakpoints for sign chart: VAs, x-intercepts, AND holes (any
+	# discontinuity splits the sign row, even when the reduced function
+	# has a finite limit across the hole)
+	crit = [r for r, _ in vas] + [r for r, _ in xints] + [r for r, _ in holes]
 	crit.sort()
 	result = {
 		'holes': holes,
@@ -527,6 +574,8 @@ def analyze(num_coeffs, den_coeffs):
 		'end': end,
 		'num_coeffs': num_coeffs,
 		'den_coeffs': den_coeffs,
+		'red_num': red_num,
+		'red_den': red_den,
 		'crit': crit,
 	}
 	return result
@@ -537,11 +586,18 @@ def analyze(num_coeffs, den_coeffs):
 #============================================
 
 def sign_chart(result):
-	"""Produce labeled sign-of-f(x) strings per interval between critical xs."""
+	"""
+	Return a list of (side, interval_str) tuples describing the sign of
+	the reduced function on each interval between critical x-values.
+
+	`side` is one of 'above', 'below', 'zero', 'undef'. `interval_str`
+	looks like "(-inf, -2)".
+	"""
 	crit = result['crit']
-	num_coeffs = result['num_coeffs']
-	den_coeffs = result['den_coeffs']
-	# pick a test point per interval
+	# evaluate the reduced function so cancelled factors don't distort signs
+	num_coeffs = result['red_num']
+	den_coeffs = result['red_den']
+	# pick a test point per interval: one outside each end, midpoints inside
 	if not crit:
 		points = [0.0]
 	else:
@@ -556,14 +612,15 @@ def sign_chart(result):
 		nv = poly_eval(num_coeffs, tp)
 		dv = poly_eval(den_coeffs, tp)
 		if dv == 0:
-			s = '?'
+			side = 'undef'
 		elif nv / dv > 0:
-			s = '+'
+			side = 'above'
 		elif nv / dv < 0:
-			s = '-'
+			side = 'below'
 		else:
-			s = '0'
-		intervals.append('(' + labels[i] + ',' + labels[i + 1] + ')' + s)
+			side = 'zero'
+		interval = '(' + labels[i] + ', ' + labels[i + 1] + ')'
+		intervals.append((side, interval))
 	return intervals
 
 
@@ -606,43 +663,68 @@ def fmt_poly(p):
 	return ''.join(parts)
 
 
+def _print_section(title, value_lines):
+	"""Print a section with a heading and one value per line."""
+	print(title)
+	for line in value_lines:
+		print(line)
+	# blank line separator between sections; TI Home-screen scrolls
+	print('')
+
+
 def print_result(result):
-	"""Print analysis in a compact TI-84-friendly format."""
+	"""Print analysis in a TI-friendly full-label format."""
+	# vertical asymptotes
 	vas = result['vas']
 	if vas:
-		print('VA: ' + ', '.join('x=' + fmt_num(r) for r, _ in vas))
+		lines = ['x = ' + fmt_num(r) for r, _ in vas]
 	else:
-		print('VA: none')
+		lines = ['none']
+	_print_section('Vertical asymptote', lines)
+	# holes
 	holes = result['holes']
 	if holes:
-		print('Hole: ' + ', '.join('x=' + fmt_num(r) for r, _ in holes))
+		lines = ['x = ' + fmt_num(r) for r, _ in holes]
 	else:
-		print('Hole: none')
+		lines = ['none']
+	_print_section('Hole', lines)
+	# x-intercepts
 	xints = result['xints']
 	if xints:
-		print('X-int: ' + ', '.join('x=' + fmt_num(r) for r, _ in xints))
+		lines = ['x = ' + fmt_num(r) for r, _ in xints]
 	else:
-		print('X-int: none')
+		lines = ['none']
+	_print_section('X-intercepts', lines)
+	# y-intercept
 	if result['yint'] is not None:
-		print('Y-int: y=' + fmt_num(result['yint']))
+		_print_section('Y-intercept', ['y = ' + fmt_num(result['yint'])])
 	else:
-		print('Y-int: undef')
+		_print_section('Y-intercept', ['undefined'])
+	# end behavior
 	end = result['end']
 	if end[0] == 'ha':
-		print('HA: y=' + fmt_num(end[1]))
+		_print_section('Horizontal asymptote', ['y = ' + fmt_num(end[1])])
 	elif end[0] == 'slant':
-		print('Slant: y=' + fmt_poly(end[1]))
+		_print_section('Slant asymptote', ['y = ' + fmt_poly(end[1])])
 	elif end[0] == 'constant':
-		print('Constant: y=' + fmt_num(end[1]))
+		_print_section('Constant function', ['y = ' + fmt_num(end[1])])
 	elif end[0] == 'linear':
-		print('Linear: y=' + fmt_poly(end[1]))
+		_print_section('Linear function', ['y = ' + fmt_poly(end[1])])
 	elif end[0] == 'polynomial':
-		print('Polynomial: y=' + fmt_poly(end[1]))
+		_print_section('Polynomial function', ['y = ' + fmt_poly(end[1])])
 	else:
-		print('No linear asymp')
-	print('Sign:')
-	for iv in sign_chart(result):
-		print(' ' + iv)
+		_print_section('End behavior', ['no linear asymptote'])
+	# sign chart, in prose form
+	for side, interval in sign_chart(result):
+		if side == 'above':
+			print('Above x-axis on')
+		elif side == 'below':
+			print('Below x-axis on')
+		elif side == 'zero':
+			print('On x-axis on')
+		else:
+			print('Undefined on')
+		print(interval)
 
 
 #============================================
@@ -651,8 +733,9 @@ def print_result(result):
 
 def main():
 	print('Rational analyzer')
-	print('Example: (x+2)(x-3)')
-	print('Use x, ^, and ( )')
+	print('Integer coefs only.')
+	print('Use x, ^, and ( ).')
+	print('Ex: (x+2)(x-3)')
 	print('')
 	# two-line prompts avoid wrapping on the narrow TI-84 screen
 	print('Enter numerator:')

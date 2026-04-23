@@ -7,32 +7,53 @@ asymptote, and a sign chart.
 ## Desktop
 
 ```
-source source_me.sh && python3 rational.py
+python3 rational.py
 ```
 
 Sample session:
 
 ```
 Rational analyzer
-Example: (x+2)(x-3)
-Use x, ^, and ( )
+Integer coefs only.
+Use x, ^, and ( ).
+Ex: (x+2)(x-3)
 
 Enter numerator:
 (x+2)(x-3)
 Enter denominator:
 (x+6)(x-1)
-VA: x=-6, x=1
-Hole: none
-X-int: x=-2, x=3
-Y-int: y=1
-HA: y=1
-Sign:
- (-inf,-6)+
- (-6,-2)-
- (-2,1)+
- (1,3)-
- (3,inf)+
+Vertical asymptote
+x = -6
+x = 1
+
+Hole
+none
+
+X-intercepts
+x = -2
+x = 3
+
+Y-intercept
+y = 1
+
+Horizontal asymptote
+y = 1
+
+Above x-axis on
+(-inf, -6)
+Below x-axis on
+(-6, -2)
+Above x-axis on
+(-2, 1)
+Below x-axis on
+(1, 3)
+Above x-axis on
+(3, inf)
 ```
+
+Output is one value per line with blank lines between sections, matching
+the TI-84 Plus CE Home screen's 26-column width. Older rows scroll off
+the top and are reachable with the arrow keys.
 
 ## TI-84 Plus CE Python
 
@@ -61,15 +82,29 @@ Square brackets `[ ]` are accepted as an alias for `( )`.
 | `Hole:` | Shared roots between numerator and denominator |
 | `X-int:` | X-intercepts (roots of reduced numerator) |
 | `Y-int:` | Value `f(0)`, or `undef` if denominator is zero at x=0 |
-| `HA:` | Horizontal asymptote when reduced `deg N <= deg D` |
-| `Slant:` | Slant asymptote when reduced `deg N == deg D + 1` and `deg D >= 1` |
-| `Constant:` / `Linear:` / `Polynomial:` | Reduced function when `deg D == 0` after cancellation |
-| `Sign:` | Sign of `f(x)` in each interval between critical values |
+| `Vertical asymptote` | Roots of the reduced denominator |
+| `Hole` | Shared roots cancelled between numerator and denominator |
+| `X-intercepts` | Roots of the reduced numerator |
+| `Y-intercept` | Value of the reduced function at `x = 0` |
+| `Horizontal asymptote` | When reduced `deg N <= deg D` |
+| `Slant asymptote` | When reduced `deg N == deg D + 1` and `deg D >= 1` |
+| `Constant / Linear / Polynomial function` | Reduced function when `deg D == 0` |
+| `Above / Below x-axis on` | Sign of the reduced function on each interval |
 
 End-behavior classification uses the *reduced* numerator and denominator
 (after shared factors are cancelled into holes), so `(3x^2-27)/(x-3)`
-reports `Linear: y=3x+9` rather than a slant asymptote. When reduced
-`deg N > deg D + 1`, `No linear asymp` is reported instead.
+reports `Linear function y = 3x+9` rather than a slant asymptote. When
+reduced `deg N > deg D + 1`, `no linear asymptote` is reported.
+
+## Edge cases and limits
+
+- `denominator is identically zero` is raised before any analysis; the
+  function is undefined everywhere.
+- A zero numerator like `0 / (x-1)` is reported as `Constant function
+  y = 0` with a hole at every root of the denominator.
+- Rational roots inside Newton's fallback scan are only searched on
+  `[-50, 50]`; polynomials with roots outside that range will leave an
+  irreducible residual rather than reporting the missing root.
 
 ## TI-Python limitations
 
